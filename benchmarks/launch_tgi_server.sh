@@ -262,3 +262,111 @@ for step in range(steps):
 	train_one_step()
 	prof.step()
 prof.stop()
+
+
+
+# CMake lowest version requirement
+cmake_minimum_required(VERSION 3.5.1)
+
+# project information
+project(acl_execute_sqrt)
+
+# Compile options
+add_compile_options(-std=c++11)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "./")
+
+set(INC_PATH $ENV{DDK_PATH})
+
+if (NOT DEFINED ENV{DDK_PATH})
+    set(INC_PATH "/usr/local/Ascend/ascend-toolkit/latest")
+    message(STATUS "set default INC_PATH: ${INC_PATH}")
+else ()
+    message(STATUS "env INC_PATH: ${INC_PATH}")
+endif()
+
+set(CUST_PKG_PATH "${INC_PATH}/opp/vendors/customize/op_api")
+
+set(LIB_PATH $ENV{NPU_HOST_LIB})
+
+# Dynamic libraries in the stub directory can only be used for compilation
+if (NOT DEFINED ENV{NPU_HOST_LIB})
+    set(LIB_PATH "/usr/local/Ascend/ascend-toolkit/latest/acllib/lib64/stub/")
+    set(LIB_PATH1 "/usr/local/Ascend/ascend-toolkit/latest/atc/lib64/stub/")
+    message(STATUS "set default LIB_PATH: ${LIB_PATH}")
+else ()
+    message(STATUS "env LIB_PATH: ${LIB_PATH}")
+endif()
+
+# Header path
+include_directories(
+    ${INC_PATH}/runtime/include
+    ${INC_PATH}/atc/include
+    ${CUST_PKG_PATH}/include
+)
+
+# add host lib path
+link_directories(
+    ${LIB_PATH}
+    ${LIB_PATH1}
+    ${CUST_PKG_PATH}/lib
+)
+
+add_executable(execute_sqrt_op
+    main.cpp
+)
+
+target_link_libraries(execute_sqrt_op
+    ascendcl
+    cust_opapi
+    acl_op_compiler
+    nnopbase
+    stdc++
+)
+
+install(TARGETS execute_sqrt_op DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+
+#!/bin/bash
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# This file is a part of the CANN Open Software.
+# Licensed under CANN Open Software License Agreement Version 1.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ======================================================================================================================
+
+if [ -n "$ASCEND_INSTALL_PATH" ]; then
+    _ASCEND_INSTALL_PATH=$ASCEND_INSTALL_PATH
+elif [ -n "$ASCEND_HOME_PATH" ]; then
+    _ASCEND_INSTALL_PATH=$ASCEND_HOME_PATH
+else
+    if [ -d "$HOME/Ascend/ascend-toolkit/latest" ]; then
+        _ASCEND_INSTALL_PATH=$HOME/Ascend/ascend-toolkit/latest
+    else
+        _ASCEND_INSTALL_PATH=/usr/local/Ascend/ascend-toolkit/latest
+    fi
+fi
+source $_ASCEND_INSTALL_PATH/bin/setenv.bash
+export DDK_PATH=$_ASCEND_INSTALL_PATH
+export NPU_HOST_LIB=$_ASCEND_INSTALL_PATH/lib64
+
+
+python3 gen_data.py
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: generate input data failed!"
+    return 1
+fi
+echo "INFO: generate input data success!"
+set -e
+rm -rf build
+mkdir -p build
+cmake -B build
+cmake --build build -j
+(
+    cd build
+    ./execute_sqrt_op
+)
+
