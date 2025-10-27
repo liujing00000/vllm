@@ -191,3 +191,43 @@ done
 echo ""
 echo "Benchmark completed. All results saved to:"
 echo "  $ROOT_RESULTS_DIR"
+
+
+import torch
+import torch_npu
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
+
+def run_mm_all_reduce_base(rank, world_size, master_ip, master_port, x1_shape, x2_shape, dtype):
+    torch_npu.npu.set_device(rank)
+    init_method = "tcp://" + master_ip + ":" + master_port
+    dist.init_process_group(backend="hccl", rank=rank, world_size=world_size, init_method=init_method)
+    from torch.distributed.distributed_c10d import _get_default_group
+
+    default_pg = _get_default_group()
+    if torch.__version__ > "2.0.1":
+        hcom_info = default_pg._get_backend(torch.device("npu")).get_hccl_comm_name(rank)
+    else:
+        hcom_info = default_pg.get_hccl_comm_name(rank)
+
+    input_ = torch.randn(x1_shape, dtype=dtype).npu()
+    weight = torch.randn(x2_shape, dtype=dtype).npu()
+    output = torch_npu.npu_mm_all_reduce_base(input_, weight, hcom_info, reduce_op="sum")
+    print("output: ", output)
+
+
+if __name__ == "__main__":
+    worksize = 8
+    master_ip = "127.0.0.1"
+    master_port = "50001"
+    x1_shape = [128, 512]
+    x2_shape = [512, 64]
+    dtype = torch.float16
+
+    mp.spawn(
+        run_mm_all_reduce_base,
+        args=(worksize, master_ip, master_port, x1_shape, x2_shape, dtype),
+        nprocs=worksize,
+    )
+
