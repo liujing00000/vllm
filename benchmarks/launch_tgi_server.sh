@@ -782,3 +782,130 @@ int main() {
   aclFinalize();
   return 0;
 }
+
+
+import requests
+import struct
+import json
+
+def list_safetensors_files(repo_id):
+    api_url = f"https://huggingface.co/api/models/{repo_id}"
+    res = requests.get(api_url)
+    res.raise_for_status()
+    files = res.json().get("siblings", [])
+    safetensors_files = [
+        f["rfilename"] for f in files if f["rfilename"].endswith(".safetensors")
+    ]
+    return safetensors_files
+
+def get_safetensors_metadata(url):
+    headers = {'Range': 'bytes=0-7'}
+    res = requests.get(url, headers=headers, verify=False)
+    header_size = struct.unpack('<Q', res.content)[0]
+
+    headers = {'Range': f'bytes=8-{7 + header_size}'}
+    res = requests.get(url, headers=headers, verify=False)
+    header_json = res.content.decode("utf-8")
+    metadata = json.loads(header_json)
+    return metadata
+
+
+# repo_id = "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8"
+# repo_id = "lmstudio-community/DeepSeek-R1-0528-BF16"
+# repo_id = "Qwen/Qwen3-235B-A22B-FP8"
+# repo_id = "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8"
+# repo_id = "Qwen/Qwen3-32B-FP8"
+repo_id = "deepseek-ai/DeepSeek-V3.1-Base"
+base_url = f"https://huggingface.co/{repo_id}/resolve/main/"
+
+safetensors_files = list_safetensors_files(repo_id)
+print(safetensors_files)
+for fname in safetensors_files:
+    url = base_url + fname
+    try:
+        metadata = get_safetensors_metadata(url)
+        for k, v in metadata.items():
+            # print(k, v)
+            try:
+                print(f"{k}: shape={v['shape']}, dtype={v['dtype']}")
+            except:
+                pass
+    except Exception as e:
+        print(f"Failed to read {fname}: {e}")
+
+
+#!/usr/bin/env python3
+import re
+import sys
+
+def convert_dtype_to_quant_config(input_file, output_file):
+    """
+    根据dtype值转换配置格式
+    - 跳过空行和 === model-*.safetensors === 行
+    - BF16 -> 生成deq_scale条目
+    - 其他 -> 保持原样
+    """
+    with open(input_file, 'r') as f_in, open(output_file, 'w') as f_out:
+        f_out.write('{\n')
+        
+        for line in f_in:
+            line = line.strip()
+            # 跳过空行和模型分块标记行
+            if not line or re.match(r'^=== model-\d+-of-\d+\.safetensors ===$', line):
+                continue
+            
+            # 解析每行结构
+            # match = re.match(r'^([^:]+):\s*shape=[^,]+, dtype=([^\s]+)', line)
+            # if not match:
+            #     print(f"警告: 跳过无法解析的行: {line}")
+            #     continue
+
+            # 使用冒号分隔行内容
+            parts = line.split(':', 1)  # 只分割第一个冒号
+            # print(parts)
+            if len(parts) != 2:
+                print(f"警告: 跳过无法解析的行: {line}")
+                continue
+                
+            param_path, rest = parts
+            param_path = param_path.strip()
+            
+            # 从剩余部分提取dtype
+            dtype_match = re.search(r'dtype=([^\s,]+)', rest)
+            if not dtype_match:
+                print(f"警告: 无法提取dtype的行: {line}")
+                continue
+
+            dtype = dtype_match.group(1)
+            # param_path, dtype = match.groups()
+            print(dtype)
+            # 根据dtype生成对应值
+            if dtype == 'BF16':
+                value = '"BFLOAT16"'
+            elif dtype == 'F32':
+                value = '"FLOAT"'
+            elif dtype == 'F8_E4M3':
+                value = '"FLOAT8_E4M3"'
+            else:
+                print("new dtype: ", value)
+            # 写入输出文件
+            f_out.write(f'  "{param_path}": {value},\n')
+        
+        # 移除最后一个逗号并闭合JSON
+        f_out.seek(f_out.tell() - 2)  # 回退到最后一个逗号位置
+        f_out.write('\n}\n')
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python convert_dtype_to_config.py <input_file> <output_file>")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+    
+    try:
+        convert_dtype_to_quant_config(input_file, output_file)
+        print(f"Successfully generated {output_file}")
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
