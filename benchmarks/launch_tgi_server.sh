@@ -909,3 +909,34 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
+
+
+import os
+import glob
+from safetensors import safe_open
+
+def simple_analyze_safetensors(directory_path):
+    """简化版本，只打印基本信息"""
+    pattern = os.path.join(directory_path, "**/*.safetensors")
+    safetensor_files = glob.glob(pattern, recursive=True)
+    
+    for file_path in safetensor_files:
+        print(f"\n文件: {file_path}")
+        print("-" * 40)
+        
+        try:
+            with safe_open(file_path, framework="pt") as f:
+                for key in f.keys():
+                    tensor = f.get_tensor(key)
+                    print(f"{key}: shape={list(tensor.shape)}, dtype={tensor.dtype}")
+        except Exception as e:
+            print(f"读取文件出错: {e}")
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("用法: python script.py <目录路径>")
+        sys.exit(1)
+    
+    directory = sys.argv[1]
+    simple_analyze_safetensors(directory)
